@@ -86,6 +86,7 @@ MODULES		+= modules/multirotor_att_control
 MODULES		+= modules/multirotor_pos_control
 MODULES		+= examples/flow_position_control
 MODULES		+= examples/flow_speed_control
+MODULES		+= examples/avoid_control
 
 #
 # Logging
