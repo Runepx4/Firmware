@@ -186,3 +186,7 @@ ORB_DEFINE(navigation_capabilities, struct navigation_capabilities_s);
 
 #include "topics/esc_status.h"
 ORB_DEFINE(esc_status, struct esc_status_s);
+
+//RB:
+#include "topics/danger.h"
+ORB_DEFINE(danger, struct danger_s);
