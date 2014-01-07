@@ -52,6 +52,7 @@
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/manual_control_setpoint.h>
+#include <uORB/topics/danger.h>
 
 static bool thread_should_exit = false;		/**< daemon exit flag */
 static bool thread_running = false;		/**< daemon status flag */
@@ -138,14 +139,20 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 	mavlink_fd = open(MAVLINK_LOG_DEVICE, 0);
 	mavlink_log_info(mavlink_fd, "[avoid_control] started");
 
-	/* subscribe to sensor_combined topic */
-			int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
-			orb_set_interval(sensor_sub_fd, 1000);
+	struct danger_s dan;
+	memset(&dan, 0, sizeof(dan));
 
-			/* advertise attitude topic */
-			struct vehicle_attitude_s att;
-			memset(&att, 0, sizeof(att));
-			orb_advert_t att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
+	/* subscribe to optical flow*/
+	int danger_sub = orb_subscribe(ORB_ID(danger));
+
+	/* subscribe to sensor_combined topic */
+	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	orb_set_interval(sensor_sub_fd, 1000);
+
+	/* advertise attitude topic */
+	//struct vehicle_attitude_s att;
+	//memset(&att, 0, sizeof(att));
+	//orb_advert_t att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
 
 
 
@@ -190,10 +197,10 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 							(double)raw.accelerometer_m_s2[2]);
 
 						/* set att and publish this information for other apps */
-						att.roll = raw.accelerometer_m_s2[0];
-						att.pitch = raw.accelerometer_m_s2[1];
-						att.yaw = raw.accelerometer_m_s2[2];
-						orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);
+						//att.roll = raw.accelerometer_m_s2[0];
+						//att.pitch = raw.accelerometer_m_s2[1];
+						//att.yaw = raw.accelerometer_m_s2[2];
+						//orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);
 					}
 					/* there could be more file descriptors here, in the form like:
 					 * if (fds[1..n].revents & POLLIN) {}
