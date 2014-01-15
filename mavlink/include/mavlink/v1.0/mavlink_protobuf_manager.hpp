@@ -7,7 +7,8 @@
 #include <tr1/memory>
 
 #include <checksum.h>
-#include <common/mavlink.h>
+//#include <common/mavlink.h>
+#include <onboardpc/mavlink.h>
 #include <mavlink_types.h>
 #include <pixhawk/pixhawk.pb.h>
 

@@ -50,9 +50,14 @@
 
 #include <uORB/uORB.h>
 #include <uORB/topics/sensor_combined.h>
+#include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/manual_control_setpoint.h>
-#include <uORB/topics/danger.h>
+#include <uORB/topics/manual_control_setpoint.h>
+#include <uORB/topics/danger.h> //RB topic
+
 
 static bool thread_should_exit = false;		/**< daemon exit flag */
 static bool thread_running = false;		/**< daemon status flag */
@@ -139,21 +144,35 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 	mavlink_fd = open(MAVLINK_LOG_DEVICE, 0);
 	mavlink_log_info(mavlink_fd, "[avoid_control] started");
 
+	/* structures */
+	struct vehicle_control_mode_s control_mode;
+	memset(&control_mode, 0, sizeof(control_mode));
+	struct vehicle_attitude_s att;
+	memset(&att, 0, sizeof(att));
+	struct vehicle_attitude_setpoint_s att_sp;
+	memset(&att_sp, 0, sizeof(att_sp));
+	struct manual_control_setpoint_s manual;
+	memset(&manual, 0, sizeof(manual));
 	struct danger_s dan;
 	memset(&dan, 0, sizeof(dan));
 
-	/* subscribe to optical flow*/
+	/* subscribe to danger message */
 	int danger_sub = orb_subscribe(ORB_ID(danger));
+	orb_set_interval(danger_sub, 500);
+
+	/* subscribe to attitude, motor setpoints and system state */
+	int control_mode_sub = orb_subscribe(ORB_ID(vehicle_control_mode));
+	int att_sub = orb_subscribe(ORB_ID(vehicle_attitude));
+	int att_sp_sub = orb_subscribe(ORB_ID(vehicle_attitude_setpoint));
+	int manual_sub = orb_subscribe(ORB_ID(manual_control_setpoint));
+
+
+	/* publish setpoint */
+	orb_advert_t att_sp_pub = orb_advertise(ORB_ID(vehicle_attitude_setpoint), &att_sp);
 
 	/* subscribe to sensor_combined topic */
-	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
-	orb_set_interval(sensor_sub_fd, 1000);
-
-	/* advertise attitude topic */
-	//struct vehicle_attitude_s att;
-	//memset(&att, 0, sizeof(att));
-	//orb_advert_t att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
-
+	//int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	//orb_set_interval(sensor_sub_fd, 500);
 
 
 	while (!thread_should_exit) {
@@ -162,15 +181,15 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 
 			/* one could wait for multiple topics with this technique, just using one here */
 			struct pollfd fds[] = {
-				{ .fd = sensor_sub_fd,   .events = POLLIN },
+				{ .fd = danger_sub,   .events = POLLIN },
 				/* there could be more file descriptors here, in the form like:
 				 * { .fd = other_sub_fd,   .events = POLLIN },
 				 */
 			};
 
-			for (int i = 0; i < 5; i++) {
-				/* wait for sensor update of 1 file descriptor for 1000 ms (1 second) */
-				int poll_ret = poll(fds, 1, 1000);
+			for (int i = 0; i < 10; i++) {
+				/* wait for danger update of 1 file descriptor for 500 ms (0.5 second) */
+				int poll_ret = poll(fds, 1, 500);
 
 				/* handle the poll result */
 				if (poll_ret == 0) {
@@ -188,19 +207,22 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 
 					if (fds[0].revents & POLLIN) {
 						/* obtained data for the first file descriptor */
-						struct sensor_combined_s raw;
-						/* copy sensors raw data into local buffer */
-						orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &raw);
-						printf("[avoid_control] Accelerometer:\t%8.4f\t%8.4f\t%8.4f\n",
-							(double)raw.accelerometer_m_s2[0],
-							(double)raw.accelerometer_m_s2[1],
-							(double)raw.accelerometer_m_s2[2]);
+						struct danger_s dan;
+						/* copy danger data into local buffer */
+						orb_copy(ORB_ID(danger), danger_sub, &dan);
+						printf("[avoid_control] Danger:\t%8.4f\t%8.4f\t%8.4f\n",
+							(double)dan.sensor_id,
+							(double)dan.avoid_dir,
+							(double)dan.danger_level);
 
-						/* set att and publish this information for other apps */
-						//att.roll = raw.accelerometer_m_s2[0];
-						//att.pitch = raw.accelerometer_m_s2[1];
-						//att.yaw = raw.accelerometer_m_s2[2];
-						//orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);
+						//Copy attitude setpoint into local buffer:
+						orb_copy(ORB_ID(vehicle_attitude_setpoint), att_sp_sub, &att_sp);
+
+						att_sp.yaw_body = dan.avoid_dir;
+						att_sp.thrust = i/10;
+
+						/* publish new attitude setpoint */
+						orb_publish(ORB_ID(vehicle_attitude_setpoint), att_sp_pub, &att_sp);
 					}
 					/* there could be more file descriptors here, in the form like:
 					 * if (fds[1..n].revents & POLLIN) {}

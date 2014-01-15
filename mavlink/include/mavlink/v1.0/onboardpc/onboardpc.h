@@ -31,7 +31,7 @@ extern "C" {
 
 
 
-#include "../message_definitions\v1.0\common/message_definitions\v1.0\common.h"
+#include "../common/common.h"
 
 // MAVLINK VERSION
 

@@ -447,7 +447,7 @@ then
 		attitude_estimator_ekf start
 	
 		# Start GPS
-		gps start
+		#gps start
 	
 	fi
 

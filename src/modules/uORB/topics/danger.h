@@ -41,6 +41,7 @@
 #define TOPIC_DANGER_H_
 
 #include "../uORB.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 /**

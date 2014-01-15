@@ -85,6 +85,7 @@ orb_advert_t pub_hil_attitude = -1;
 
 static orb_advert_t cmd_pub = -1;
 static orb_advert_t flow_pub = -1;
+static orb_advert_t danger_pub = -1;
 
 static orb_advert_t offboard_control_sp_pub = -1;
 static orb_advert_t vicon_position_pub = -1;
@@ -211,6 +212,29 @@ handle_message(mavlink_message_t *msg)
 			orb_publish(ORB_ID(vehicle_vicon_position), vicon_position_pub, &vicon_position);
 		}
 	}
+
+	//Mavlink Message from the onboard computer / laserscanner:
+	if (msg->msgid == MAVLINK_MSG_ID_DANGER) {
+			mavlink_danger_t dang;
+			mavlink_msg_danger_decode(msg, &dang);
+
+			struct danger_s d;
+
+			d.time_usec = hrt_absolute_time();
+			d.sensor_id = dang.sensor_id;
+			d.danger_level = dang.danger_level;
+			d.danger_dist = dang.danger_dist;
+			d.danger_dir = dang.danger_dir;
+			d.avoid_level = dang.avoid_level;
+			d.avoid_dir = dang.avoid_dir;
+			//check if topic is advertised
+			if (danger_pub <= 0) {
+				danger_pub = orb_advertise(ORB_ID(danger), &d);
+			} else {
+				// publish
+				orb_publish(ORB_ID(danger), danger_pub, &d);
+			}
+		}
 
 	/* Handle quadrotor motor setpoints */
 
