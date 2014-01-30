@@ -414,8 +414,8 @@ then
 		echo "[init] Start logging"
 		sh /etc/init.d/rc.logging
 		
-		#echo "[init] Start GPS"
-		#gps start
+		echo "[init] Start GPS"
+		gps start
 	fi
 	
 	#
