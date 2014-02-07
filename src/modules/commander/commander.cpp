@@ -250,7 +250,7 @@ int commander_main(int argc, char *argv[])
 		daemon_task = task_spawn_cmd("commander",
 					     SCHED_DEFAULT,
 					     SCHED_PRIORITY_MAX - 40,
-					     2088,
+					     3000,
 					     commander_thread_main,
 					     (argv) ? (const char **)&argv[2] : (const char **)NULL);
 
@@ -685,7 +685,7 @@ int commander_thread_main(int argc, char *argv[])
 
 	pthread_attr_t commander_low_prio_attr;
 	pthread_attr_init(&commander_low_prio_attr);
-	pthread_attr_setstacksize(&commander_low_prio_attr, 1728);
+	pthread_attr_setstacksize(&commander_low_prio_attr, 2992);
 
 	struct sched_param param;
 	(void)pthread_attr_getschedparam(&commander_low_prio_attr, &param);
@@ -1407,7 +1407,7 @@ check_mode_switches(struct manual_control_setpoint_s *sp_man, struct vehicle_sta
 {
 	/* main mode switch */
 	if (!isfinite(sp_man->mode_switch)) {
-		warnx("mode sw not finite");
+		/* default to manual if signal is invalid */
 		current_status->mode_switch = MODE_SWITCH_MANUAL;
 
 	} else if (sp_man->mode_switch > STICK_ON_OFF_LIMIT) {
@@ -1867,6 +1867,10 @@ void *commander_low_prio_loop(void *arg)
 
 				break;
 			}
+
+		case VEHICLE_CMD_START_RX_PAIR:
+		/* handled in the IO driver */
+		break;
 
 		default:
 			answer_command(cmd, VEHICLE_CMD_RESULT_UNSUPPORTED);
