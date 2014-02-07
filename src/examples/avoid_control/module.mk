@@ -35,6 +35,7 @@
 # Daemon application
 #
 
-MODULE_COMMAND		= avoid_control
+MODULE_COMMAND	= avoid_control
 
-SRCS			= avoid_control_main.c
+SRCS		= avoid_control_main.c \
+		  avoid_control_params.c

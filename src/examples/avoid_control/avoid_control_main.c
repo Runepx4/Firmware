@@ -47,17 +47,19 @@
 
 #include <systemlib/systemlib.h>
 #include <systemlib/err.h>
+#include <systemlib/perf_counter.h>
 
 #include <uORB/uORB.h>
+#include <uORB/topics/parameter_update.h>
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_control_mode.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/manual_control_setpoint.h>
-#include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/danger.h> //RB topic
 
+#include "avoid_control_params.h"
 
 static bool thread_should_exit = false;		/**< daemon exit flag */
 static bool thread_running = false;		/**< daemon status flag */
@@ -135,6 +137,7 @@ int avoid_control_main(int argc, char *argv[])
 	exit(1);
 }
 
+
 int avoid_control_thread_main(int argc, char *argv[]) {
 
 	warnx("[avoid_control] starting\n");
@@ -158,84 +161,225 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 
 	/* subscribe to danger message */
 	int danger_sub = orb_subscribe(ORB_ID(danger));
-	orb_set_interval(danger_sub, 500);
 
 	/* subscribe to attitude, motor setpoints and system state */
 	int control_mode_sub = orb_subscribe(ORB_ID(vehicle_control_mode));
 	int att_sub = orb_subscribe(ORB_ID(vehicle_attitude));
 	int att_sp_sub = orb_subscribe(ORB_ID(vehicle_attitude_setpoint));
 	int manual_sub = orb_subscribe(ORB_ID(manual_control_setpoint));
-
+	/* subscribe to parameter message */
+	int parameter_update_sub = orb_subscribe(ORB_ID(parameter_update));
 
 	/* publish setpoint */
 	orb_advert_t att_sp_pub = orb_advertise(ORB_ID(vehicle_attitude_setpoint), &att_sp);
 
-	/* subscribe to sensor_combined topic */
-	//int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
-	//orb_set_interval(sensor_sub_fd, 500);
+	/* parameters init*/
+	struct avoid_control_params params;
+	struct avoid_control_param_handles param_handles;
+	parameters_init(&param_handles);
+	parameters_update(&param_handles, &params);
+
+	/* register the perf counter */
+	perf_counter_t mc_err_perf = perf_alloc(PC_COUNT, "avoid_control_err");
+	perf_counter_t mc_loop_perf = perf_alloc(PC_ELAPSED, "avoid_control_runtime");
+	perf_counter_t mc_interval_perf = perf_alloc(PC_INTERVAL, "avoid_control_interval");
+
+	static bool sensors_ready = false;
+	static bool status_changed = false;
+	static bool commincation_lost = false;
 
 
 	while (!thread_should_exit) {
 
-			int error_counter = 0;
+		/* wait for first attitude msg to be sure all data are available */
+		if (sensors_ready)
+		{
+			/* polling */
+			struct pollfd fds[2] = {
+				{ .fd = danger_sub, .events = POLLIN }, // danger message from onboard PC
+				{ .fd = parameter_update_sub,   .events = POLLIN }
+				};
 
-			/* one could wait for multiple topics with this technique, just using one here */
-			struct pollfd fds[] = {
-				{ .fd = danger_sub,   .events = POLLIN },
-				/* there could be more file descriptors here, in the form like:
-				 * { .fd = other_sub_fd,   .events = POLLIN },
-				 */
-			};
+			/* wait for a danger message update, check for exit condition every 500 ms */
+			int ret = poll(fds, 2, 300);
 
-			for (int i = 0; i < 10; i++) {
-				/* wait for danger update of 1 file descriptor for 500 ms (0.5 second) */
-				int poll_ret = poll(fds, 1, 500);
-
-				/* handle the poll result */
-				if (poll_ret == 0) {
-					/* this means none of our providers is giving us data */
-					printf("[avoid_control] Got no data within a second\n");
-				} else if (poll_ret < 0) {
-					/* this is seriously bad - should be an emergency */
-					if (error_counter < 10 || error_counter % 50 == 0) {
-						/* use a counter to prevent flooding (and slowing us down) */
-						printf("[avoid_control] ERROR return value from poll(): %d\n"
-							, poll_ret);
-					}
-					error_counter++;
-				} else {
-
-					if (fds[0].revents & POLLIN) {
-						/* obtained data for the first file descriptor */
-						struct danger_s dan;
-						/* copy danger data into local buffer */
-						orb_copy(ORB_ID(danger), danger_sub, &dan);
-						printf("[avoid_control] Danger:\t%8.4f\t%8.4f\t%8.4f\n",
-							(double)dan.sensor_id,
-							(double)dan.avoid_dir,
-							(double)dan.danger_level);
-
-						//Copy attitude setpoint into local buffer:
-						orb_copy(ORB_ID(vehicle_attitude_setpoint), att_sp_sub, &att_sp);
-
-						att_sp.yaw_body = dan.avoid_dir;
-						att_sp.thrust = i/10;
-
-						/* publish new attitude setpoint */
-						orb_publish(ORB_ID(vehicle_attitude_setpoint), att_sp_pub, &att_sp);
-					}
-					/* there could be more file descriptors here, in the form like:
-					 * if (fds[1..n].revents & POLLIN) {}
-					 */
+			if (ret < 0)
+			{
+				/* poll error, count it in perf */
+				perf_count(mc_err_perf);
+			}
+			else if (ret == 0)
+			{
+				if (!commincation_lost)
+				{
+					mavlink_log_info(mavlink_fd,"[AvoidCtrl] communication lost!");
+					commincation_lost = true;
 				}
+				/* no return value */
+				//Change to manual control in case onboard communication with the linux_pc fails:
+				bool updated; //bool used to check if new information has been published to a subscription
+				//if RC inputs changed, get local copy of rc-inputs into the local buffer manual:
+				orb_check(manual_sub, &updated);
+				if (updated) orb_copy(ORB_ID(manual_control_setpoint), manual_sub, &manual);
+
+				att_sp.pitch_body = manual.pitch;
+				att_sp.roll_body = manual.roll;
+				att_sp.yaw_body = manual.yaw;
+				att_sp.thrust = manual.throttle;
+				att_sp.timestamp = hrt_absolute_time();
+
+			}
+			else
+			{
+				/* parameter update available? */
+				if (fds[1].revents & POLLIN)
+				{
+					/* read from param to clear updated flag */
+					struct parameter_update_s update;
+					orb_copy(ORB_ID(parameter_update), parameter_update_sub, &update);
+
+					parameters_update(&param_handles, &params);
+					mavlink_log_info(mavlink_fd,"[AvoidCtrl] parameters updated.");
+				}
+
+				/* only run controller if "danger" changed */
+				if (fds[0].revents & POLLIN)
+				{
+					perf_begin(mc_loop_perf);
+					// obtained data for the first file descriptor
+					struct danger_s dan;
+					// copy danger data into local buffer
+					orb_copy(ORB_ID(danger), danger_sub, &dan);
+
+					if (commincation_lost)
+					{
+						mavlink_log_info(mavlink_fd,"[AvoidCtrl] communication restored..");
+						commincation_lost = false;
+					}
+
+					/* Do not use data from the laserscanner if the scanner is not within the horizontal limits */
+					if ((att.pitch > params.limit_pitch) && (att.roll > params.limit_roll)) {
+						 dan.avoid_dir = 0.0;
+						 dan.avoid_level = 0;
+						 dan.danger_dir = 0;
+						 dan.danger_dist = 4000;
+						 dan.danger_level = 0;
+					 }
+
+					bool updated; //bool used to check if new information has been published to a subscription
+
+					/* if control_mode changed, get a local copy of the control mode */
+					orb_check(control_mode_sub, &updated);
+					if (updated) orb_copy(ORB_ID(vehicle_control_mode), control_mode_sub, &control_mode);
+
+					//if attitude setpoint changed, get local copy of attitude setpoint into the local buffer att_sp:
+					orb_check(att_sp_sub, &updated);
+					if (updated) orb_copy(ORB_ID(vehicle_attitude_setpoint), att_sp_sub, &att_sp);
+
+					//if RC inputs changed, get local copy of rc-inputs into the local buffer manual:
+					orb_check(manual_sub, &updated);
+					if (updated) orb_copy(ORB_ID(manual_control_setpoint), manual_sub, &manual);
+
+					//if attitude changed, get local copy of attitude into the local buffer att:
+					orb_check(att_sub, &updated);
+					if (updated) orb_copy(ORB_ID(vehicle_attitude), att_sub, &att);
+
+					if (!control_mode.flag_control_manual_enabled)
+					{
+						/* limit roll and pitch corrections */
+						float pitch_corr = -(sinf(dan.avoid_dir) * ((float)dan.avoid_level/255.0)) * params.limit_pitch;
+						float roll_corr = (cosf(dan.avoid_dir) * ((float)dan.avoid_level/255.0)) * params.limit_roll;
+
+						//float pitch_sp_ctl = manual.pitch / params.rc_scale_pitch;// [-1..0..1]
+						//float roll_sp_ctl = manual.roll / params.rc_scale_roll; // [-1..0..1]
+
+						float pitch_body = pitch_corr + manual.pitch;
+						float roll_body  = roll_corr + manual.roll;
+
+						/* limit roll and pitch outputs */
+						if((pitch_body <= params.rc_scale_pitch) && (pitch_body >= -params.rc_scale_pitch))
+							{
+							att_sp.pitch_body = pitch_body;
+							}
+						else
+						{
+							if(pitch_body > params.rc_scale_pitch) att_sp.pitch_body = params.rc_scale_pitch;
+							if(pitch_body < -params.rc_scale_pitch)	att_sp.pitch_body = -params.rc_scale_pitch;
+						}
+						if((roll_body <= params.rc_scale_roll) && (roll_body >= -params.rc_scale_roll))
+						{
+							att_sp.roll_body = roll_body;
+						}
+						else
+						{
+							if(roll_body > params.rc_scale_roll) att_sp.roll_body = params.rc_scale_roll;
+							if(roll_body < -params.rc_scale_roll) att_sp.roll_body = -params.rc_scale_roll;
+						}
+
+						//att_sp.yaw_body = dan.avoid_dir;
+						att_sp.yaw_body = manual.yaw;
+						att_sp.thrust = manual.throttle;
+						att_sp.timestamp = hrt_absolute_time();
+
+					}
+
+					/* measure in what intervals the controller runs */
+					perf_count(mc_interval_perf);
+					perf_end(mc_loop_perf);
+				}
+
 			}
 
-		sleep(10);
+			// publish new attitude setpoint
+			orb_publish(ORB_ID(vehicle_attitude_setpoint), att_sp_pub, &att_sp);
+		}
+		else
+		{
+			/* sensors not ready waiting for first attitude msg */
+
+			/* polling */
+			struct pollfd fds[1] = {
+				{ .fd = danger_sub, .events = POLLIN },
+			};
+
+			/* wait for a attitude msg, check for exit condition every 5 s */
+			int ret = poll(fds, 1, 5000);
+
+			if (ret < 0)
+			{
+				/* poll error, count it in perf */
+				perf_count(mc_err_perf);
+			}
+			else if (ret == 0)
+			{
+				/* no return value, ignore */
+				mavlink_log_info(mavlink_fd,"[AvoidCtrl] wating for first danger msg...");
+			}
+			else
+			{
+				if (fds[0].revents & POLLIN)
+				{
+					sensors_ready = true;
+					mavlink_log_info(mavlink_fd,"[AvoidCtrl] initialized.");
+				}
+			}
+		}
+
 	}
 
 	warnx("[avoid_control] exiting.\n");
+	mavlink_log_info(mavlink_fd,"[AvoidCtrl] ending now...");
 
 	thread_running = false;
+	close(parameter_update_sub);
+	close(att_sub);
+	close(danger_sub);
+	close(control_mode_sub);
+	close(att_sp_pub);
 
+	perf_print_counter(mc_loop_perf);
+	perf_free(mc_loop_perf);
+
+	fflush(stdout);
 	return 0;
 }

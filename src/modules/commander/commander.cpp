@@ -887,7 +887,7 @@ int commander_thread_main(int argc, char *argv[])
 
 		/* update condition_global_position_valid */
 		check_valid(global_position.timestamp, POSITION_TIMEOUT, global_position.valid, &(status.condition_global_position_valid), &status_changed);
-		//status.condition_global_position_valid = true; //RB 15-01-2014
+		status.condition_global_position_valid = true; //RB 31-01-2014
 		/* update local position estimate */
 		orb_check(local_position_sub, &updated);
 
@@ -902,6 +902,7 @@ int commander_thread_main(int argc, char *argv[])
 		//RB 15-01-2014:
 		status.condition_local_position_valid = true;
 		status.condition_local_altitude_valid = true;
+		local_position.landed = false;
 
 		if (status.is_rotary_wing && status.condition_local_altitude_valid) {
 			if (status.condition_landed != local_position.landed) {
