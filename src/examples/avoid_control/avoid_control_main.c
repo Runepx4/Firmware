@@ -320,7 +320,6 @@ int avoid_control_thread_main(int argc, char *argv[]) {
 						att_sp.yaw_body = manual.yaw;
 						att_sp.thrust = manual.throttle;
 						att_sp.timestamp = hrt_absolute_time();
-
 					}
 
 					/* measure in what intervals the controller runs */
