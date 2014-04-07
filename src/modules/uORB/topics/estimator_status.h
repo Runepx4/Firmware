@@ -1,7 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
- *   Author: Lorenz Meier <lm@inf.ethz.ch>
+ *   Copyright (c) 2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,52 +32,49 @@
  ****************************************************************************/
 
 /**
- * @file mavlink_bridge_header
- * MAVLink bridge header for UART access.
+ * @file estimator_status.h
+ * Definition of the estimator_status_report uORB topic.
  *
  * @author Lorenz Meier <lm@inf.ethz.ch>
  */
 
-/* MAVLink adapter header */
-#ifndef MAVLINK_BRIDGE_HEADER_H
-#define MAVLINK_BRIDGE_HEADER_H
+#ifndef ESTIMATOR_STATUS_H_
+#define ESTIMATOR_STATUS_H_
 
-#define MAVLINK_USE_CONVENIENCE_FUNCTIONS
-
-/* use efficient approach, see mavlink_helpers.h */
-#define MAVLINK_SEND_UART_BYTES mavlink_send_uart_bytes
-
-#define MAVLINK_GET_CHANNEL_BUFFER mavlink_get_channel_buffer
-#define MAVLINK_GET_CHANNEL_STATUS mavlink_get_channel_status
-
-#include <v1.0/mavlink_types.h>
-#include <unistd.h>
-
-
-/* Struct that stores the communication settings of this system.
-   you can also define / alter these settings elsewhere, as long
-   as they're included BEFORE mavlink.h.
-   So you can set the
-
-   mavlink_system.sysid = 100; // System ID, 1-255
-   mavlink_system.compid = 50; // Component/Subsystem ID, 1-255
-
-   Lines also in your main.c, e.g. by reading these parameter from EEPROM.
- */
-extern mavlink_system_t mavlink_system;
+#include <stdint.h>
+#include <stdbool.h>
+#include "../uORB.h"
 
 /**
- * @brief Send multiple chars (uint8_t) over a comm channel
- *
- * @param chan MAVLink channel to use, usually MAVLINK_COMM_0 = UART0
- * @param ch Character to send
+ * @addtogroup topics
+ * @{
  */
-extern void mavlink_send_uart_bytes(mavlink_channel_t chan, uint8_t *ch, int length);
 
-mavlink_status_t* mavlink_get_channel_status(uint8_t chan);
-mavlink_message_t* mavlink_get_channel_buffer(uint8_t chan);
+/**
+ * Estimator status report.
+ *
+ * This is a generic status report struct which allows any of the onboard estimators
+ * to write the internal state to the system log.
+ *
+ */
+struct estimator_status_report {
 
-//#include <v1.0/common/mavlink.h>
-#include <v1.0/onboardpc/mavlink.h>
+	/* NOTE: Ordering of fields optimized to align to 32 bit / 4 bytes - change with consideration only   */
 
-#endif /* MAVLINK_BRIDGE_HEADER_H */
+	uint64_t timestamp;			/**< Timestamp in microseconds since boot */
+	float states[32];			/**< Internal filter states */
+	float n_states;				/**< Number of states effectively used */
+	bool states_nan;			/**< If set to true, one of the states is NaN */
+	bool covariance_nan;			/**< If set to true, the covariance matrix went NaN */
+	bool kalman_gain_nan;			/**< If set to true, the Kalman gain matrix went NaN */
+
+};
+
+/**
+ * @}
+ */
+
+/* register this as object request broker structure */
+ORB_DECLARE(estimator_status);
+
+#endif
