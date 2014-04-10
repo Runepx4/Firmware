@@ -1,8 +1,9 @@
 #!nsh
 #
-# Generic 10" Octo coaxial geometry
+# Generic 12" Octo coaxial geometry
+# Total Mass: 6.0 kg 
 #
-# Lorenz Meier <lm@inf.ethz.ch>
+# Rune Brogaard <runebrogaard@gmail.com>
 #
 
 sh /etc/init.d/rc.mc_defaults
